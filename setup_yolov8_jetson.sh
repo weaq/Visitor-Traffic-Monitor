@@ -1,46 +1,36 @@
 #!/bin/bash
+
 set -e
 
-echo "🔧 Starting YOLOv8 setup for Jetson Nano..."
+echo "📦 อัปเดตระบบ..."
+sudo apt update
+sudo apt install -y python3-pip python3-dev python3-venv libopenblas-base libopenmpi-dev libomp-dev libjpeg-dev zlib1g-dev libpython3-dev
 
-# === STEP 1: System Update ===
-echo "🔄 Updating system..."
-sudo apt update && sudo apt upgrade -y
+echo "🧱 สร้าง virtual environment..."
+python3 -m venv yolov8_env
+source yolov8_env/bin/activate
 
-# === STEP 2: Python 3.6 Virtual Environment ===
-echo "🐍 Setting up Python 3.6 virtual environment..."
-sudo apt install -y python3-pip python3-virtualenv
-virtualenv -p python3 venv_yolo
-source venv_yolo/bin/activate
+echo "⬆️ อัปเกรด pip และ setuptools..."
+pip install --upgrade pip==21.3.1 setuptools==59.6.0
 
-# === STEP 3: Install Required Python Packages ===
-echo "📦 Installing Python packages..."
-
-# Install numpy first to avoid build issue
-pip install --upgrade pip
-pip install numpy==1.19.5
-
-# === STEP 4: Install PyTorch 1.10.0 (with CUDA 10.2 support) ===
-echo "⚙️ Installing PyTorch 1.10.0 for JetPack 4.4 - 4.6..."
-
-# Download wheel
-wget https://nvidia.box.com/shared/static/2sj9kxz8e3vnzsdn5dfzhd0a7ogq0fl3.whl -O torch-1.10.0-cp36-cp36m-linux_aarch64.whl
-
-# Install it
+echo "🔥 ติดตั้ง PyTorch 1.10.0 (สำหรับ JetPack 4.4–4.6)..."
+wget https://nvidia.box.com/shared/static/8s03e41vld9vypm6rfxu9f19faw0gqj0.whl -O torch-1.10.0-cp36-cp36m-linux_aarch64.whl
 pip install torch-1.10.0-cp36-cp36m-linux_aarch64.whl
+rm torch-1.10.0-cp36-cp36m-linux_aarch64.whl
 
-# === STEP 5: Install Ultralytics YOLOv8 ===
-echo "🧠 Installing YOLOv8..."
+echo "🧠 ติดตั้ง torchvision แบบ source..."
+sudo apt install -y libjpeg-dev zlib1g-dev
+git clone --branch v0.11.1 https://github.com/pytorch/vision.git
+cd vision
+python setup.py install
+cd ..
+rm -rf vision
+
+echo "📸 ติดตั้ง OpenCV..."
 pip install opencv-python==4.5.5.64
+
+echo "🧠 ติดตั้ง ultralytics==8.0.20 (เวอร์ชันสุดท้ายที่รองรับ Python 3.6)..."
 pip install ultralytics==8.0.20
 
-# === STEP 6: Test Torch CUDA ===
-echo "🧪 Verifying PyTorch and CUDA..."
-python3 -c "import torch; print('Torch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available())"
-
-# === STEP 7: Download YOLOv8 model (nano) ===
-echo "⬇️ Downloading YOLOv8n model..."
-yolo task=detect mode=predict model=yolov8n.pt imgsz=640 source='https://ultralytics.com/images/bus.jpg' save=True
-
-echo "✅ YOLOv8 setup completed successfully!"
-echo "🚀 Run example: source venv_yolo/bin/activate && yolo task=detect mode=predict model=yolov8n.pt source=0"
+echo "✅ เสร็จแล้ว! ให้ activate ด้วยคำสั่ง:"
+echo "source yolov8_env/bin/activate"
