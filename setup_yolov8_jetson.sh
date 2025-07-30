@@ -1,42 +1,27 @@
-#!/bin/bash
+sudo apt update
+sudo apt upgrade
+sudo apt install build-essential libssl-dev zlib1g-dev libncurses5-dev libncursesw5-dev libreadline-dev libsqlite3-dev libgdbm-dev libdb5.3-dev libbz2-dev libexpat1-dev liblzma-dev libffi-dev libc6-dev
 
-echo "===== เพิ่ม Swap 4GB ====="
-sudo fallocate -l 4G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+Download the Python source code for version 3.8 from the official Python website. You can use the following command to download it directly to your Jetson Nano:
+	wget https://www.python.org/ftp/python/3.8.12/Python-3.8.12.tar.xz
 
-echo "===== ติดตั้ง Python3 + Virtualenv ====="
-sudo apt-get update
-sudo apt-get install -y python3-pip python3-virtualenv libopenblas-base libopenmpi-dev libomp-dev libjpeg-dev zlib1g-dev libpython3-dev libavcodec-dev libavformat-dev libswscale-dev git
 
-echo "===== สร้าง virtualenv สำหรับ yolo_env ====="
-virtualenv -p python3.6 yolo_env
-source yolo_env/bin/activate
+Extract the downloaded archive by running the following command:
+tar -xf Python-3.8.12.tar.xz
+cd Python-3.8.12
 
-echo "===== ติดตั้ง Cython และ numpy ====="
-pip install --upgrade pip
-pip install 'Cython<3' numpy
+Configure the build process:
+	./configure --enable-optimizations
+	 
+Build Python:
+make -j4
 
-echo "===== ดาวน์โหลดและติดตั้ง PyTorch 1.10.0 ====="
-mkdir -p torch_install && cd torch_install
-wget https://nvidia.box.com/shared/static/fjtbno0vpo676a25cgvuqc1wty0fkkg6.whl -O torch-1.10.0-cp36-cp36m-linux_aarch64.whl
-pip install torch-1.10.0-cp36-cp36m-linux_aarch64.whl
-cd ..
+Once the compilation is complete, you can install Python by running the following command:
+	sudo make altinstall
+	python3.8 --version
 
-echo "===== ดาวน์โหลดและติดตั้ง torchvision จาก source ====="
-git clone --branch v0.11.1 https://github.com/pytorch/vision torchvision
-cd torchvision
-export BUILD_VERSION=0.11.1
-pip install -e .
-cd ..
+That's it! You have successfully installed Python 3.8 on your Jetson Nano.
 
-echo "===== ติดตั้ง YOLOv8 (ultralytics) รุ่นเบา ====="
-pip install ultralytics==8.0.20 opencv-python
-
-echo "===== ทดสอบ PyTorch ====="
-python -c "import torch; print('Torch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available())"
-
-echo "===== ติดตั้งเสร็จสิ้น ====="
-echo "พร้อมใช้งาน YOLOv8n แล้วใน virtualenv 'yolo_env'"
+Now come out from python3.8 folder and create a separate environment using python 3.8
+python3.8 -m venv myenv                                                
+source myenv/bin/activate
