@@ -1,97 +1,78 @@
-import os
-from datetime import datetime
-from ultralytics import YOLO
 import cv2
-from deep_sort_realtime.deepsort_tracker import DeepSort
+import time
+from ultralytics import YOLO
+from collections import defaultdict
 
-model = YOLO('yolov8n.pt')
-tracker = DeepSort(max_age=30)
+# โหลดโมเดล YOLOv8 (กำหนด confidence)
+model = YOLO("yolov8n.pt")
+
+# เปิดกล้อง
 cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-count_in = 0
-count_out = 0
-counted_ids = set()
-positions_dict = {}
+# เก็บเวลา count ล่าสุดของแต่ละ track
+last_count_time = defaultdict(lambda: 0)
 
-line_position = 300
-current_day = datetime.now().day
+# เก็บตำแหน่งก่อนหน้า (เพื่อป้องกันการเปลี่ยน object ผิด)
+last_positions = {}
 
-def get_today_filename():
-    today_str = datetime.now().strftime('%Y-%m-%d')
-    if not os.path.exists('logs'):
-        os.makedirs('logs')
-    return os.path.join('logs', f"count_{today_str}.csv")
+# เก็บจำนวนเข้า-ออก
+count_in, count_out = 0, 0
 
-def write_counts_to_file(in_count, out_count):
-    filename = get_today_filename()
-    file_exists = os.path.isfile(filename)
-    with open(filename, 'a') as f:
-        if not file_exists:
-            f.write('datetime,count_in,count_out\n')
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        f.write(f'{now},{in_count},{out_count}\n')
+# กำหนดโซน (Zone A = ซ้าย, Zone B = ขวา)
+zoneA_x, zoneB_x = 200, 400
+cooldown_time = 2  # วินาที
 
 while True:
-    # รีเซ็ตทุกวันใหม่
-    if datetime.now().day != current_day:
-        current_day = datetime.now().day
-        counted_ids.clear()
-        count_in = 0
-        count_out = 0
-
     ret, frame = cap.read()
     if not ret:
         break
 
-    results = model(frame)[0]
-    detections = []
-    for r in results.boxes.data.tolist():
-        x1, y1, x2, y2, score, cls_id = r
-        if int(cls_id) == 0:
-            bbox = [x1, y1, x2 - x1, y2 - y1]
-            detections.append((bbox, score, 'person'))
+    # ตรวจจับวัตถุ (ใช้ conf 0.5)
+    results = model.track(frame, persist=True, conf=0.5, iou=0.4)
 
-    tracks = tracker.update_tracks(detections, frame=frame)
+    if results[0].boxes.id is not None:
+        for box, track_id in zip(results[0].boxes.xyxy, results[0].boxes.id):
+            x1, y1, x2, y2 = map(int, box[:4])
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
-    for track in tracks:
-        if not track.is_confirmed():
-            continue
+            track_id = int(track_id)
+            now = time.time()
 
-        track_id = track.track_id
-        l, t, r_, b = track.to_ltrb()
-        cx, cy = int((l + r_) / 2), int((t + b) / 2)
+            # ตำแหน่งก่อนหน้า
+            prev_pos = last_positions.get(track_id, (cx, cy))
+            last_positions[track_id] = (cx, cy)
 
-        prev_pos = positions_dict.get(track_id, None)
+            # คำนวณความใกล้เคียง (ถ้าเคลื่อนที่มากเกินไปในเฟรมเดียว ให้ข้าม)
+            dx, dy = abs(cx - prev_pos[0]), abs(cy - prev_pos[1])
+            if dx > 150 or dy > 150:  
+                continue  # ป้องกันการเปลี่ยน object ID ผิด
 
-        if prev_pos is not None:
-            prev_cy = prev_pos[1]
-
-            if track_id not in counted_ids:
-                if prev_cy < line_position and cy >= line_position:
+            # ตรวจจับการข้ามโซน (มี cooldown)
+            if (now - last_count_time[track_id]) > cooldown_time:
+                if prev_pos[0] < zoneA_x and cx > zoneB_x:
                     count_in += 1
-                    counted_ids.add(track_id)
-                    write_counts_to_file(count_in, count_out)
-                elif prev_cy > line_position and cy <= line_position:
+                    last_count_time[track_id] = now
+                elif prev_pos[0] > zoneB_x and cx < zoneA_x:
                     count_out += 1
-                    counted_ids.add(track_id)
-                    write_counts_to_file(count_in, count_out)
+                    last_count_time[track_id] = now
 
-        positions_dict[track_id] = (cx, cy)
+            # วาดกรอบ
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, f"ID {track_id}", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        cv2.rectangle(frame, (int(l), int(t)), (int(r_), int(b)), (0, 255, 0), 2)
-        cv2.putText(frame, f'ID: {track_id}', (int(l), int(t) - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    # แสดงผล count
+    cv2.putText(frame, f"IN: {count_in}", (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    cv2.putText(frame, f"OUT: {count_out}", (20, 80),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-    cv2.line(frame, (0, line_position), (frame.shape[1], line_position), (0, 0, 255), 2)
-    cv2.putText(frame, f'IN: {count_in}  OUT: {count_out}', (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
-    cv2.putText(frame, datetime.now().strftime('%H:%M:%S'), (10, 60),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 255, 200), 2)
+    # วาดเส้นโซน
+    cv2.line(frame, (zoneA_x, 0), (zoneA_x, frame.shape[0]), (255, 0, 0), 2)
+    cv2.line(frame, (zoneB_x, 0), (zoneB_x, frame.shape[0]), (0, 0, 255), 2)
 
-    cv2.imshow('People Counter', frame)
-    if cv2.waitKey(1) == 27:
+    cv2.imshow("Counter", frame)
+    if cv2.waitKey(1) & 0xFF == 27:  # กด ESC เพื่อออก
         break
 
 cap.release()
