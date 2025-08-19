@@ -1,19 +1,19 @@
 camera:
-  source: '/dev/video0'          # กล้อง webcam หรือ RTSP
+  source: '/dev/video0'   # กล้อง webcam หรือ RTSP
   width: 640
   height: 480
-  frame_rate: 30
-  flip_frame: FALSE   # กลับภาพซ้าย-ขวาเหมือนกระจก กรณีใช้กล้อง build-in ของโน๊ตบุ๊ค
+  frame_rate: 25
+  flip_frame: FALSE     # กลับภาพซ้าย-ขวาเหมือนกระจก กรณีใช้กล้อง build-in ของโน๊ตบุ๊ค
 
 yolo:
   model: "yolov8n.pt"
   conf: 0.5          # ค่า confidence threshold (0–1)
   iou: 0.45          # ค่า IoU threshold สำหรับ NMS
-  classes: [0, 2]       # ตรวจจับตรม COCO class id  # 0=person, 2=car
+  classes: [0, 3]       # ตรวจจับตรม COCO class id  # 0=person, 2=bicycle ,3=car ,4=motorcycle ,6=bus ,8=truck
 
 zones:
-  zone_a: 70   # A (เส้น)
-  zone_b: 30   # B (เส้น)
+  zone_a: 70   # A 70 %(เส้น)
+  zone_b: 30   # B 30 %(เส้น)
 
 counter:
-  cooldown: 1.0        # วินาที กันนับซ้ำ
+  cooldown: 0.5        # วินาที กันนับซ้ำ
