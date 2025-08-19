@@ -13,10 +13,15 @@ print(f"✅ กำลังใช้งานบน {device.upper()}")
 
 # --- โหลดโมเดลและ tracker ---
 model = YOLO('yolov8n.pt').to(device)
-tracker = DeepSort(max_age=30)
+tracker = DeepSort(max_age=15, n_init=3, nn_budget=100)
 
 # --- กล้อง ---
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FPS, 30)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+
 if not cap.isOpened():
     print("❌ ไม่สามารถเปิดกล้องได้")
     exit()
@@ -26,6 +31,8 @@ positions_dict = {}       # track_id -> (cx, cy)
 zone_status = {}          # track_id -> zone ล่าสุด ("A","B","mid")
 last_count_time = {}      # track_id -> เวลาที่นับล่าสุด
 cooldown = 1.0            # วินาที
+
+track_state = {}  # track_id -> 'toward_A', 'toward_B', 'none'
 
 current_day = datetime.now().day
 
@@ -62,8 +69,8 @@ def load_counts_today():
     return 0, 0
 
 def get_zones(frame_width):
-    zone_A = int(frame_width * 0.7)  # ขวา
-    zone_B = int(frame_width * 0.3)  # ซ้าย
+    zone_A = int(frame_width * 0.70)  # ขวา
+    zone_B = int(frame_width * 0.30)  # ซ้าย
     return zone_A, zone_B
 
 def get_zone(cx, zone_A, zone_B):
@@ -74,16 +81,26 @@ def get_zone(cx, zone_A, zone_B):
     else:
         return "mid"
 
-def check_cross(prev_zone, current_zone):
-    if prev_zone=="mid" and current_zone=="B":
-        return "in"
-    elif prev_zone=="mid" and current_zone=="A":
-        return "out"
-    elif prev_zone=="A" and current_zone=="B":
-        return "in"
-    elif prev_zone=="B" and current_zone=="A":
-        return "out"
+def check_cross(prev_zone, current_zone, track_id):
+    """
+    คืนค่า 'in' / 'out' หรือ None
+    ใช้ track_state[track_id] เก็บทิศทาง
+    """
+    if prev_zone == "mid":
+        if current_zone == "B" and track_state.get(track_id) == "toward_B":
+            track_state[track_id] = "none"
+            return "in"
+        elif current_zone == "A" and track_state.get(track_id) == "toward_A":
+            track_state[track_id] = "none"
+            return "out"
+    elif prev_zone == "A" and current_zone == "mid":
+        track_state[track_id] = "toward_B"
+    elif prev_zone == "B" and current_zone == "mid":
+        track_state[track_id] = "toward_A"
+    
     return None
+
+
 
 # --- โหลดค่า count ล่าสุดตอนเริ่มระบบ ---
 count_in, count_out = load_counts_today()
@@ -109,8 +126,8 @@ try:
         frame_width = frame.shape[1]
         zone_A, zone_B = get_zones(frame_width)
 
-        # --- ตรวจจับ YOLOv8 ใหม่ ---
-        results = model(frame, conf=0.5, verbose=False)
+        # --- ตรวจจับ YOLOv8 ---
+        results = model.predict(frame, conf=0.5, verbose=False, device=device)
         detections = []
 
         if results:
@@ -147,7 +164,7 @@ try:
                 zone_status[track_id] = current_zone
                 continue
 
-            cross = check_cross(prev_zone, current_zone)
+            cross = check_cross(prev_zone, current_zone, track_id)
             if cross and (now_time - last_time) > cooldown:
                 if cross == "in":
                     count_in += 1
@@ -169,14 +186,21 @@ try:
         cv2.line(frame, (zone_A, 0), (zone_A, frame.shape[0]), (255, 0, 0), 2)
         cv2.line(frame, (zone_B, 0), (zone_B, frame.shape[0]), (0, 0, 255), 2)
 
-        # --- แสดงผลนับ ---
+        # --- แสดงผล ---
         cv2.putText(frame, f'IN: {count_in}  OUT: {count_out}', (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
         cv2.putText(frame, datetime.now().strftime('%H:%M:%S'), (10, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 255, 200), 2)
 
+        # แสดงผลแบบเต็มจอ
+        cv2.namedWindow('People Counter Zone A-B with Cooldown', cv2.WND_PROP_FULLSCREEN)
+        cv2.setWindowProperty('People Counter Zone A-B with Cooldown',
+                              cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
         cv2.imshow('People Counter Zone A-B with Cooldown', frame)
-        if cv2.waitKey(1) == 27:  # ESC
+
+        # ออกด้วยปุ่ม q หรือ Esc
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q') or key == 27:  # q หรือ Esc
             break
 
         # --- เคลียร์ dictionary ป้องกัน memory leak ---
