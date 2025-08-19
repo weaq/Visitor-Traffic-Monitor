@@ -7,19 +7,47 @@ import cv2
 from deep_sort_realtime.deepsort_tracker import DeepSort
 import numpy as np
 
+import yaml
+
+# โหลด config.yaml
+with open("config.yaml", "r", encoding="utf-8") as f:
+    cfg = yaml.safe_load(f)
+
+# camera
+camera_cfg = cfg.get("camera", {})
+CAM_SOURCE = camera_cfg.get("source", 0)
+CAM_WIDTH  = camera_cfg.get("width", 640)
+CAM_HEIGHT = camera_cfg.get("height", 480)
+CAM_FRAMERATE = camera_cfg.get("frame_rate", 30)
+CAM_FLIPFRAME = camera_cfg.get("flip_frame", False)
+
+# yolo
+yolo_cfg = cfg.get("yolo", {})
+MODEL_PATH = yolo_cfg.get("model", "yolov8n.pt")
+CONF       = yolo_cfg.get("conf", 0.5)
+IOU        = yolo_cfg.get("iou", 0.45)
+CLASSES    = yolo_cfg.get("classes", [0])
+
+zones_cfg = cfg.get("zones", {})
+ZONE_A = zones_cfg.get("zone_a", 70)
+ZONE_B = zones_cfg.get("zone_b", 30)
+
+counter_cfg = cfg.get("counter", {})
+COOLDOWN = counter_cfg.get("cooldown", 2.0)
+
 # --- ตรวจสอบ device ---
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print(f"✅ กำลังใช้งานบน {device.upper()}")
 
 # --- โหลดโมเดลและ tracker ---
-model = YOLO('yolov8n.pt').to(device)
+model = YOLO(MODEL_PATH).to(device)
 tracker = DeepSort(max_age=15, n_init=3, nn_budget=100)
 
 # --- กล้อง ---
-cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FPS, 30)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+cap = cv2.VideoCapture(CAM_SOURCE)
+cap.set(cv2.CAP_PROP_FPS, CAM_FRAMERATE)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
 
 
 if not cap.isOpened():
@@ -30,9 +58,7 @@ if not cap.isOpened():
 positions_dict = {}       # track_id -> (cx, cy)
 zone_status = {}          # track_id -> zone ล่าสุด ("A","B","mid")
 last_count_time = {}      # track_id -> เวลาที่นับล่าสุด
-cooldown = 1.0            # วินาที
-
-Flip_Frame = 1 # กลับภาพซ้าย-ขวาเหมือนกระจก กรณีใช้กล้อง build-in ของโน๊ตบุ๊ค
+cooldown = COOLDOWN            # วินาที
 
 track_state = {}  # track_id -> 'toward_A', 'toward_B', 'none'
 
@@ -71,8 +97,8 @@ def load_counts_today():
     return 0, 0
 
 def get_zones(frame_width):
-    zone_A = int(frame_width * 0.70)  # ขวา
-    zone_B = int(frame_width * 0.30)  # ซ้าย
+    zone_A = int(frame_width * (ZONE_A / 100))  # ขวา
+    zone_B = int(frame_width * (ZONE_B / 100))  # ซ้าย
     return zone_A, zone_B
 
 def get_zone(cx, zone_A, zone_B):
@@ -126,14 +152,14 @@ try:
             break
 
         # --- Flip frame horizontal (mirror) ---
-        if Flip_Frame :
+        if CAM_FLIPFRAME :
             frame = cv2.flip(frame, 1)  # 1 = horizontal, 0 = vertical, -1 = both
 
         frame_width = frame.shape[1]
         zone_A, zone_B = get_zones(frame_width)
 
         # --- ตรวจจับ YOLOv8 ---
-        results = model.predict(frame, conf=0.5, verbose=False, device=device)
+        results = model.predict(frame, conf=CONF, iou=IOU, verbose=False, device=device)
         detections = []
 
         if results:
@@ -144,9 +170,15 @@ try:
                 cls_ids = res.boxes.cls.int().cpu().numpy()
 
                 for (x1, y1, x2, y2), score, cls_id in zip(boxes, scores, cls_ids):
-                    if int(cls_id) == 0:  # คน
-                        bbox = [x1, y1, x2-x1, y2-y1]
-                        detections.append((bbox, score, 'person'))
+                    if int(cls_id) == 0:      # คน
+                        label = 'person'
+                    elif int(cls_id) == 2:    # รถยนต์
+                        label = 'car'
+                    else:
+                        continue
+
+                    bbox = [x1, y1, x2-x1, y2-y1]
+                    detections.append((bbox, score, label))
 
         # --- Update tracker ---
         tracks = tracker.update_tracks(detections, frame=frame)
