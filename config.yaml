@@ -11,9 +11,10 @@ yolo:
   iou: 0.45          # ค่า IoU threshold สำหรับ NMS
   classes: [0, 3]       # ตรวจจับตรม COCO class id  # 0=person, 2=bicycle ,3=car ,4=motorcycle ,6=bus ,8=truck
 
+# --- โซนสำหรับ cross pixel (หน่วย % ของความกว้าง frame) ---
 zones:
-  zone_a: 70   # A 70 %(เส้น)
-  zone_b: 30   # B 30 %(เส้น)
+  zone_a: 70         # ขวา → เกณฑ์ pixel = frame_width * 70%
+  zone_b: 30         # ซ้าย → เกณฑ์ pixel = frame_width * 30%
 
 counter:
   cooldown: 0.5        # วินาที กันนับซ้ำ
