@@ -32,6 +32,8 @@ zone_status = {}          # track_id -> zone ล่าสุด ("A","B","mid")
 last_count_time = {}      # track_id -> เวลาที่นับล่าสุด
 cooldown = 1.0            # วินาที
 
+Flip_Frame = 1 # กลับภาพซ้าย-ขวาเหมือนกระจก กรณีใช้กล้อง build-in ของโน๊ตบุ๊ค
+
 track_state = {}  # track_id -> 'toward_A', 'toward_B', 'none'
 
 current_day = datetime.now().day
@@ -122,6 +124,10 @@ try:
         if not ret:
             print("⚠️ ไม่สามารถอ่านภาพจากกล้องได้")
             break
+
+        # --- Flip frame horizontal (mirror) ---
+        if Flip_Frame :
+            frame = cv2.flip(frame, 1)  # 1 = horizontal, 0 = vertical, -1 = both
 
         frame_width = frame.shape[1]
         zone_A, zone_B = get_zones(frame_width)
