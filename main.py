@@ -1,23 +1,31 @@
 import os
 import time
 from datetime import datetime
+import torch
 from ultralytics import YOLO
 import cv2
 from deep_sort_realtime.deepsort_tracker import DeepSort
 import numpy as np
 
+# --- ตรวจสอบ device ---
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f"✅ กำลังใช้งานบน {device.upper()}")
+
 # --- โหลดโมเดลและ tracker ---
-model = YOLO('yolov8n.pt')
+model = YOLO('yolov8n.pt').to(device)
 tracker = DeepSort(max_age=30)
 
 # --- กล้อง ---
 cap = cv2.VideoCapture(0)
+if not cap.isOpened():
+    print("❌ ไม่สามารถเปิดกล้องได้")
+    exit()
 
 # --- ตัวแปร ---
 positions_dict = {}       # track_id -> (cx, cy)
 zone_status = {}          # track_id -> zone ล่าสุด ("A","B","mid")
 last_count_time = {}      # track_id -> เวลาที่นับล่าสุด
-cooldown = 2.0            # วินาที
+cooldown = 1.0            # วินาที
 
 current_day = datetime.now().day
 
@@ -82,91 +90,105 @@ count_in, count_out = load_counts_today()
 print(f"เริ่มระบบ count_in={count_in}, count_out={count_out}")
 
 # --- main loop ---
-while True:
-    # รีเซ็ตทุกวันใหม่
-    if datetime.now().day != current_day:
-        current_day = datetime.now().day
-        count_in, count_out = 0, 0
-        zone_status.clear()
-        last_count_time.clear()
-        positions_dict.clear()
+try:
+    while True:
+        # รีเซ็ตทุกวันใหม่
+        if datetime.now().day != current_day:
+            current_day = datetime.now().day
+            count_in, count_out = 0, 0
+            zone_status.clear()
+            last_count_time.clear()
+            positions_dict.clear()
+            print("🔄 เริ่มนับใหม่วันใหม่")
 
-    ret, frame = cap.read()
-    if not ret:
-        break
+        ret, frame = cap.read()
+        if not ret:
+            print("⚠️ ไม่สามารถอ่านภาพจากกล้องได้")
+            break
 
-    frame_width = frame.shape[1]
-    zone_A, zone_B = get_zones(frame_width)
+        frame_width = frame.shape[1]
+        zone_A, zone_B = get_zones(frame_width)
 
-    # --- ตรวจจับ YOLOv8 ใหม่ ---
-    results = model(frame, conf=0.5)
-    detections = []
+        # --- ตรวจจับ YOLOv8 ใหม่ ---
+        results = model(frame, conf=0.5, verbose=False)
+        detections = []
 
-    if results:
-        res = results[0]
-        if len(res.boxes) > 0:
-            boxes = res.boxes.xyxy.cpu().numpy()
-            scores = res.boxes.conf.cpu().numpy()
-            cls_ids = res.boxes.cls.int().cpu().numpy()
+        if results:
+            res = results[0]
+            if len(res.boxes) > 0:
+                boxes = res.boxes.xyxy.cpu().numpy()
+                scores = res.boxes.conf.cpu().numpy()
+                cls_ids = res.boxes.cls.int().cpu().numpy()
 
-            for (x1, y1, x2, y2), score, cls_id in zip(boxes, scores, cls_ids):
-                if int(cls_id) == 0:  # คน
-                    bbox = [x1, y1, x2-x1, y2-y1]
-                    detections.append((bbox, score, 'person'))
+                for (x1, y1, x2, y2), score, cls_id in zip(boxes, scores, cls_ids):
+                    if int(cls_id) == 0:  # คน
+                        bbox = [x1, y1, x2-x1, y2-y1]
+                        detections.append((bbox, score, 'person'))
 
-    # --- Update tracker ---
-    tracks = tracker.update_tracks(detections, frame=frame)
+        # --- Update tracker ---
+        tracks = tracker.update_tracks(detections, frame=frame)
 
-    for track in tracks:
-        if not track.is_confirmed():
-            continue
+        for track in tracks:
+            if not track.is_confirmed():
+                continue
 
-        track_id = track.track_id
-        l, t, r_, b = track.to_ltrb()
-        cx = int((l + r_) / 2)
+            track_id = track.track_id
+            l, t, r_, b = track.to_ltrb()
+            cx = int((l + r_) / 2)
 
-        current_zone = get_zone(cx, zone_A, zone_B)
-        prev_zone = zone_status.get(track_id)
+            current_zone = get_zone(cx, zone_A, zone_B)
+            prev_zone = zone_status.get(track_id)
 
-        now_time = time.time()
-        last_time = last_count_time.get(track_id, 0)
+            now_time = time.time()
+            last_time = last_count_time.get(track_id, 0)
 
-        # track ใหม่เริ่มจาก current_zone ไม่ถูกนับทันที
-        if prev_zone is None:
+            # track ใหม่เริ่มจาก current_zone ไม่ถูกนับทันที
+            if prev_zone is None:
+                zone_status[track_id] = current_zone
+                continue
+
+            cross = check_cross(prev_zone, current_zone)
+            if cross and (now_time - last_time) > cooldown:
+                if cross == "in":
+                    count_in += 1
+                else:
+                    count_out += 1
+                last_count_time[track_id] = now_time
+                write_counts_to_file(count_in, count_out)
+
+            # อัปเดต zone ล่าสุด
             zone_status[track_id] = current_zone
-            continue
+            positions_dict[track_id] = (cx, int((t+b)/2))
 
-        cross = check_cross(prev_zone, current_zone)
-        if cross and (now_time - last_time) > cooldown:
-            if cross == "in":
-                count_in += 1
-            else:
-                count_out += 1
-            last_count_time[track_id] = now_time
-            write_counts_to_file(count_in, count_out)
+            # วาดกรอบและ ID
+            cv2.rectangle(frame, (int(l), int(t)), (int(r_), int(b)), (0, 255, 0), 2)
+            cv2.putText(frame, f'ID: {track_id}', (int(l), int(t)-10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        # อัปเดต zone ล่าสุด
-        zone_status[track_id] = current_zone
-        positions_dict[track_id] = (cx, int((t+b)/2))
+        # --- วาดเส้นโซน ---
+        cv2.line(frame, (zone_A, 0), (zone_A, frame.shape[0]), (255, 0, 0), 2)
+        cv2.line(frame, (zone_B, 0), (zone_B, frame.shape[0]), (0, 0, 255), 2)
 
-        # วาดกรอบและ ID
-        cv2.rectangle(frame, (int(l), int(t)), (int(r_), int(b)), (0, 255, 0), 2)
-        cv2.putText(frame, f'ID: {track_id}', (int(l), int(t)-10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        # --- แสดงผลนับ ---
+        cv2.putText(frame, f'IN: {count_in}  OUT: {count_out}', (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+        cv2.putText(frame, datetime.now().strftime('%H:%M:%S'), (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 255, 200), 2)
 
-    # --- วาดเส้นโซน ---
-    cv2.line(frame, (zone_A, 0), (zone_A, frame.shape[0]), (255, 0, 0), 2)
-    cv2.line(frame, (zone_B, 0), (zone_B, frame.shape[0]), (0, 0, 255), 2)
+        cv2.imshow('People Counter Zone A-B with Cooldown', frame)
+        if cv2.waitKey(1) == 27:  # ESC
+            break
 
-    # --- แสดงผลนับ ---
-    cv2.putText(frame, f'IN: {count_in}  OUT: {count_out}', (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
-    cv2.putText(frame, datetime.now().strftime('%H:%M:%S'), (10, 60),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 255, 200), 2)
+        # --- เคลียร์ dictionary ป้องกัน memory leak ---
+        if len(zone_status) > 1000:
+            zone_status.clear()
+            last_count_time.clear()
+            positions_dict.clear()
 
-    cv2.imshow('People Counter Zone A-B with Cooldown', frame)
-    if cv2.waitKey(1) == 27:  # ESC
-        break
+except KeyboardInterrupt:
+    print("🛑 หยุดการทำงานด้วย Ctrl+C")
 
-cap.release()
-cv2.destroyAllWindows()
+finally:
+    cap.release()
+    cv2.destroyAllWindows()
+    print("🚪 ปิดระบบเรียบร้อย")
