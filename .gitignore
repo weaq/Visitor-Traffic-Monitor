@@ -1,0 +1,6 @@
+# Logs
+__pycache__
+/logs/*
+.env
+*.pt
+.git
