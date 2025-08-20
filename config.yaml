@@ -3,7 +3,7 @@ camera:
   width: 640
   height: 480
   frame_rate: 25
-  flip_frame: FALSE     # กลับภาพซ้าย-ขวาเหมือนกระจก กรณีใช้กล้อง build-in ของโน๊ตบุ๊ค
+  flip_frame: FALSE     # TRUE หรือ FALSE เพื่อกลับภาพซ้าย-ขวาเหมือนกระจก กรณีใช้กล้อง build-in ของโน๊ตบุ๊ค
 
 yolo:
   model: "yolov8n.pt"
@@ -18,3 +18,4 @@ zones:
 
 counter:
   cooldown: 0.5        # วินาที กันนับซ้ำ
+  direction: "horizontal"   # "horizontal" หรือ "vertical"

@@ -34,6 +34,8 @@ ZONE_B = zones_cfg.get("zone_b", 30)
 
 counter_cfg = cfg.get("counter", {})
 COOLDOWN = counter_cfg.get("cooldown", 2.0)
+COUNTER_DIRECTION = counter_cfg.get("direction", "horizontal")
+
 
 # --- ตรวจสอบ device ---
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -96,18 +98,32 @@ def load_counts_today():
                     return 0, 0
     return 0, 0
 
-def get_zones(frame_width):
-    zone_A = int(frame_width * (ZONE_A / 100))  # ขวา
-    zone_B = int(frame_width * (ZONE_B / 100))  # ซ้าย
+def get_zones(frame_width, frame_height):
+    if COUNTER_DIRECTION == "vertical":
+        zone_A = int(frame_height * (ZONE_A / 100))  # ล่าง
+        zone_B = int(frame_height * (ZONE_B / 100))  # บน
+    else:
+        zone_A = int(frame_width * (ZONE_A / 100))   # ขวา
+        zone_B = int(frame_width * (ZONE_B / 100))   # ซ้าย
     return zone_A, zone_B
 
-def get_zone(cx, zone_A, zone_B):
-    if cx >= zone_A:
-        return "A"
-    elif cx <= zone_B:
-        return "B"
+
+def get_zone(cx, cy, zone_A, zone_B, direction):
+    if direction == "vertical":
+        if cy >= zone_A:
+            return "A"   # ล่าง
+        elif cy <= zone_B:
+            return "B"   # บน
+        else:
+            return "mid"
     else:
-        return "mid"
+        if cx >= zone_A:
+            return "A"   # ขวา
+        elif cx <= zone_B:
+            return "B"   # ซ้าย
+        else:
+            return "mid"
+
 
 def check_cross(prev_zone, current_zone, track_id):
     """
@@ -155,8 +171,9 @@ try:
         if CAM_FLIPFRAME :
             frame = cv2.flip(frame, 1)  # 1 = horizontal, 0 = vertical, -1 = both
 
-        frame_width = frame.shape[1]
-        zone_A, zone_B = get_zones(frame_width)
+        frame_height, frame_width = frame.shape[:2]
+        zone_A, zone_B = get_zones(frame_width, frame_height)
+
 
         # --- ตรวจจับ YOLOv8 ---
         results = model.predict(frame, conf=CONF, iou=IOU, verbose=False, device=device)
@@ -189,9 +206,12 @@ try:
 
             track_id = track.track_id
             l, t, r_, b = track.to_ltrb()
-            cx = int((l + r_) / 2)
 
-            current_zone = get_zone(cx, zone_A, zone_B)
+            cx = int((l + r_) / 2)
+            cy = int((t + b) / 2)
+
+            current_zone = get_zone(cx, cy, zone_A, zone_B, COUNTER_DIRECTION)
+
             prev_zone = zone_status.get(track_id)
 
             now_time = time.time()
@@ -221,8 +241,12 @@ try:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
         # --- วาดเส้นโซน ---
-        cv2.line(frame, (zone_A, 0), (zone_A, frame.shape[0]), (255, 0, 0), 2)
-        cv2.line(frame, (zone_B, 0), (zone_B, frame.shape[0]), (0, 0, 255), 2)
+        if COUNTER_DIRECTION == "vertical":
+            cv2.line(frame, (0, zone_A), (frame.shape[1], zone_A), (255, 0, 0), 2)
+            cv2.line(frame, (0, zone_B), (frame.shape[1], zone_B), (0, 0, 255), 2)
+        else:
+            cv2.line(frame, (zone_A, 0), (zone_A, frame.shape[0]), (255, 0, 0), 2)
+            cv2.line(frame, (zone_B, 0), (zone_B, frame.shape[0]), (0, 0, 255), 2)
 
         # --- แสดงผล ---
         cv2.putText(frame, f'IN: {count_in}  OUT: {count_out}', (10, 30),
