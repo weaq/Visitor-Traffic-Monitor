@@ -1,4 +1,4 @@
-import os
+import os, sys
 import time
 from datetime import datetime
 import torch
@@ -8,6 +8,12 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 import numpy as np
 
 import yaml
+
+def resource_path(relative_path):
+    """ หา path ของไฟล์เมื่อรันเป็น .exe """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 # โหลด config.yaml
 with open("config.yaml", "r", encoding="utf-8") as f:
@@ -249,8 +255,18 @@ try:
             cv2.line(frame, (zone_B, 0), (zone_B, frame.shape[0]), (0, 0, 255), 2)
 
         # --- แสดงผล ---
-        cv2.putText(frame, f'IN: {count_in}  OUT: {count_out}', (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+        text_in = f'IN: {count_in}'
+        (text_w, text_h), baseline = cv2.getTextSize(text_in, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+
+        # วาง IN
+        x_in, y_in = 10, 30
+        cv2.putText(frame, text_in, (x_in, y_in), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
+
+        # วาง OUT ต่อจาก IN + ระยะห่าง 20 px
+        x_out = x_in + text_w + 20
+        cv2.putText(frame, f'OUT: {count_out}', (x_out, y_in), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+        
+         # --- แสดงเวลา ---
         cv2.putText(frame, datetime.now().strftime('%H:%M:%S'), (10, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 255, 200), 2)
 
