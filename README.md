@@ -27,7 +27,9 @@ project/
 
 $ pip install pyinstaller
 
-$ pyinstaller --onefile --add-data "config.yaml;." people_counter.py
+** สำหรับ Ubuntu **
+$ pyinstaller --onefile --add-data "config.yaml:." main.py
 
-
+** สำหรับ Windows **
+$ pyinstaller --onefile --add-data "config.yaml;." main.py
 

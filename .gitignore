@@ -5,3 +5,6 @@ __pycache__
 *.pt
 .git
 /yolov8-env/*
+/build/*
+/dist/*
+*.spec

@@ -16,7 +16,8 @@ def resource_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
 
 # โหลด config.yaml
-with open("config.yaml", "r", encoding="utf-8") as f:
+config_path = resource_path("config.yaml")
+with open(config_path, "r", encoding="utf-8") as f:
     cfg = yaml.safe_load(f)
 
 # camera
